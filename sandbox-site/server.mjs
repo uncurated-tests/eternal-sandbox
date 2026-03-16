@@ -259,6 +259,15 @@ function renderPage(status) {
       .note { margin-top: 0.75rem; font-size: 0.82rem; color: var(--muted-fg); line-height: 1.6; }
       .link { color: var(--fg); }
       .error { color: #b91c1c; }
+      .cli-card { margin-top: 1rem; }
+      .cli-command {
+        margin-top: 0.45rem;
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.82rem;
+        color: var(--fg);
+        word-break: break-all;
+      }
+
       @media (max-width: 640px) {
         .shell { padding-top: 1.2rem; }
         .grid { grid-template-columns: 1fr; }
@@ -308,6 +317,11 @@ function renderPage(status) {
         Filesystem changes persist across generations. When this sandbox rotates, the controller snapshots
         its full disk state and boots the next generation from that snapshot.
       </p>
+
+      <div class="card cli-card">
+        <p class="label">SSH into this sandbox</p>
+        <p class="cli-command">sandbox connect ${status.sandboxId ?? "unknown"}</p>
+      </div>
     </div>
 
     <script>
