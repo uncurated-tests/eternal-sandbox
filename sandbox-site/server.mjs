@@ -363,8 +363,9 @@ function renderPulseBars(status) {
   return status.pulseHistory
     .slice(-24)
     .map((pulse) => {
-      const height = 26 + Math.min(Math.abs(pulse.driftMs), 140) / 2;
-      return `<span class="pulse-bar pulse-${pulse.phase}" style="height:${height}px"></span>`;
+      const height = 12 + Math.min(Math.abs(pulse.driftMs), 200) / 4;
+      const cls = pulse.phase === "steady" ? "pulse-steady" : pulse.phase === "handoff" ? "pulse-handoff" : "pulse-recovered";
+      return `<span class="pulse-bar ${cls}" style="height:${height}px"></span>`;
     })
     .join("");
 }
@@ -373,14 +374,8 @@ function renderPage(status) {
   const sandboxUptime = formatDuration(status.sandboxUptimeMs);
   const chainUptime = formatDuration(status.chainUptimeMs);
   const rotationCountdown = formatDuration(status.msUntilRotation);
-  const redirectBanner = status.nextSandboxUrl
-    ? `
-      <div class="redirect-banner">
-        <strong>Fresh sandbox ready.</strong>
-        <span>This page will hand visitors to the next generation shortly.</span>
-        <a href="${status.nextSandboxUrl}">Jump now</a>
-      </div>
-    `
+  const redirectNotice = status.nextSandboxUrl
+    ? `<p class="note">Next sandbox is ready. <a class="link" href="${status.nextSandboxUrl}">Jump now</a></p>`
     : "";
 
   return `<!doctype html>
@@ -388,339 +383,183 @@ function renderPage(status) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <title>Eternal Sandbox</title>
     <style>
       :root {
-        --bg: #07131e;
-        --panel: rgba(10, 24, 38, 0.84);
-        --panel-strong: rgba(13, 31, 47, 0.96);
-        --line: rgba(146, 187, 198, 0.14);
-        --text: #e6f2ef;
-        --muted: #97b0b8;
-        --accent-coral: #ff8057;
-        --accent-cyan: #67d8d1;
-        --accent-gold: #ffcc73;
-        --good: #90f0b1;
+        --bg: #fafafa; --fg: #09090b; --card: #fff; --muted: #f4f4f5;
+        --muted-fg: #71717a; --border: #e4e4e7;
       }
-
-      * { box-sizing: border-box; }
+      * { box-sizing: border-box; margin: 0; }
       body {
-        margin: 0;
-        min-height: 100vh;
-        color: var(--text);
-        font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
-        background:
-          radial-gradient(circle at 15% 15%, rgba(255, 128, 87, 0.18), transparent 20%),
-          radial-gradient(circle at 85% 12%, rgba(103, 216, 209, 0.18), transparent 18%),
-          linear-gradient(180deg, #0a1622 0%, #07131e 62%, #050b12 100%);
+        min-height: 100vh; background: var(--bg); color: var(--fg);
+        font-family: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
-
-      main {
-        width: min(1100px, calc(100% - 2rem));
-        margin: 0 auto;
-        padding: 2rem 0 4rem;
+      a { color: inherit; }
+      .shell { width: min(640px, calc(100% - 2rem)); margin: 0 auto; padding: 2.5rem 0 4rem; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+      .badge {
+        display: inline-flex; align-items: center; border-radius: 999px;
+        padding: 0.3rem 0.6rem; font-size: 0.7rem; font-weight: 600;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        border: 1px solid #d1fae5; background: #ecfdf5; color: #047857;
       }
-
-      .hero,
-      .metric,
-      .detail {
-        border: 1px solid var(--line);
-        border-radius: 28px;
-        background: linear-gradient(180deg, rgba(16, 34, 51, 0.94), rgba(10, 21, 31, 0.88));
-        box-shadow: 0 24px 100px rgba(1, 9, 17, 0.42);
-        backdrop-filter: blur(18px);
+      .title { display: flex; align-items: center; gap: 0.6rem; }
+      .title h1 { font-size: 1rem; font-weight: 600; letter-spacing: -0.02em; }
+      .btn {
+        display: inline-flex; align-items: center; gap: 0.35rem;
+        padding: 0.45rem 0.8rem; border-radius: 0.5rem; font-size: 0.82rem; font-weight: 500;
+        background: var(--fg); color: var(--bg); text-decoration: none; border: none; cursor: pointer;
       }
-
-      .hero {
-        display: grid;
-        grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.82fr);
-        gap: 1.5rem;
-        padding: 2rem;
-        overflow: hidden;
-        position: relative;
+      .btn-ghost { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
+      .counter {
+        margin-top: 2rem; text-align: center;
       }
-
-      .hero::after {
-        content: "";
-        position: absolute;
-        inset: auto -10% -28% auto;
-        width: 300px;
-        height: 300px;
-        background: radial-gradient(circle, rgba(103, 216, 209, 0.24), transparent 66%);
+      .counter .label {
+        font-size: 0.7rem; font-weight: 600; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--muted-fg);
       }
-
-      .eyebrow {
-        margin: 0 0 0.75rem;
-        letter-spacing: 0.22em;
-        text-transform: uppercase;
-        font-size: 0.82rem;
-        color: var(--accent-gold);
+      .counter .value {
+        margin-top: 0.5rem;
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: clamp(2.8rem, 8vw, 4.5rem); font-weight: 600;
+        letter-spacing: -0.06em; line-height: 1;
       }
-
-      h1 {
-        margin: 0;
-        font-family: "Iowan Old Style", "Palatino Linotype", serif;
-        font-size: clamp(3rem, 8vw, 5rem);
-        line-height: 0.92;
+      .counter .sub {
+        margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted-fg);
       }
-
-      .lede,
-      .meta,
-      .copy,
-      .note {
-        margin: 1.1rem 0 0;
-        color: var(--muted);
-        line-height: 1.7;
+      .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; margin-top: 1.5rem; }
+      .card {
+        border: 1px solid var(--border); border-radius: 0.75rem;
+        background: var(--card); padding: 0.9rem;
       }
-
-      .pill {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0.45rem 0.8rem;
-        border-radius: 999px;
-        width: fit-content;
-        letter-spacing: 0.18em;
-        text-transform: uppercase;
-        font-size: 0.78rem;
-        font-weight: 700;
-        background: var(--good);
-        color: #0a2a17;
+      .card .label {
+        font-size: 0.65rem; font-weight: 600; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--muted-fg);
       }
-
-      .hero-panel {
-        display: grid;
-        gap: 0.9rem;
-        align-content: start;
-        border-radius: 22px;
-        padding: 1.4rem;
-        background: linear-gradient(180deg, rgba(12, 26, 39, 0.94), rgba(8, 16, 24, 0.88));
-        position: relative;
-        z-index: 1;
+      .card .num {
+        margin-top: 0.35rem;
+        font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 1.5rem; font-weight: 600; letter-spacing: -0.04em;
       }
-
-      .hero-panel a {
-        display: inline-flex;
-        width: fit-content;
-        align-items: center;
-        justify-content: center;
-        padding: 0.9rem 1.15rem;
-        border-radius: 16px;
-        text-decoration: none;
-        color: inherit;
-        background: linear-gradient(135deg, rgba(255, 128, 87, 0.18), rgba(103, 216, 209, 0.18));
-        border: 1px solid rgba(255,255,255,0.08);
-        font-weight: 600;
+      .detail { margin-top: 1.5rem; }
+      .detail-row {
+        display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+        padding: 0.5rem 0; border-bottom: 1px solid var(--border); font-size: 0.85rem;
       }
-
-      .grid,
-      .details {
-        display: grid;
-        gap: 1rem;
-        margin-top: 1.25rem;
+      .detail-row:last-child { border-bottom: none; }
+      .detail-row .dl { color: var(--muted-fg); }
+      .detail-row .dv { text-align: right; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pulse-section { margin-top: 1.5rem; }
+      .pulse-label { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted-fg); }
+      .pulse-wrap {
+        margin-top: 0.6rem; display: flex; align-items: flex-end; gap: 2px;
+        height: 4.5rem; border: 1px solid var(--border); border-radius: 0.5rem;
+        background: var(--muted); padding: 0.5rem;
       }
-
-      .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .details { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-      .metric,
-      .detail { padding: 1.5rem; }
-
-      .metric-label,
-      .detail-title {
-        margin: 0;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-        font-size: 0.88rem;
-        color: rgba(230, 242, 239, 0.72);
-      }
-
-      .metric-value {
-        margin: 1rem 0 0.45rem;
-        font-size: clamp(2rem, 5vw, 3.25rem);
-        line-height: 1;
-        font-family: "IBM Plex Mono", "Menlo", monospace;
-      }
-
-      .detail-list {
-        margin: 1rem 0 0;
-        display: grid;
-        gap: 0.85rem;
-      }
-
-      .detail-list strong {
-        display: block;
-        margin-bottom: 0.1rem;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        font-size: 0.8rem;
-        color: rgba(230, 242, 239, 0.68);
-      }
-
-      .pulse-strip {
-        display: flex;
-        align-items: end;
-        gap: 0.35rem;
-        min-height: 120px;
-        margin-top: 1rem;
-      }
-
-      .pulse-bar {
-        width: calc((100% - 23 * 0.35rem) / 24);
-        min-width: 8px;
-        border-radius: 999px 999px 12px 12px;
-        background: rgba(255, 255, 255, 0.14);
-      }
-
-      .pulse-steady { background: linear-gradient(180deg, rgba(103,216,209,0.95), rgba(103,216,209,0.24)); }
-      .pulse-handoff { background: linear-gradient(180deg, rgba(255,204,115,0.95), rgba(255,204,115,0.24)); }
-      .pulse-recovered { background: linear-gradient(180deg, rgba(255,128,87,0.95), rgba(255,128,87,0.24)); }
-
-      .redirect-banner {
-        display: grid;
-        gap: 0.45rem;
-        margin: 1.25rem 0 0;
-        padding: 1rem 1.1rem;
-        border-radius: 18px;
-        background: rgba(255, 204, 115, 0.12);
-        border: 1px solid rgba(255, 204, 115, 0.18);
-      }
-
-      .redirect-banner a {
-        width: fit-content;
-        color: var(--text);
-      }
-
-      @media (max-width: 860px) {
-        main { width: min(100% - 1.1rem, 1100px); padding-top: 1.1rem; }
-        .hero, .grid, .details { grid-template-columns: 1fr; }
+      .pulse-bar { flex: 1; min-width: 4px; border-radius: 999px; background: #e4e4e7; }
+      .pulse-steady { background: #18181b; }
+      .pulse-handoff { background: #a1a1aa; }
+      .pulse-recovered { background: #52525b; }
+      .note { margin-top: 0.75rem; font-size: 0.82rem; color: var(--muted-fg); line-height: 1.6; }
+      .link { color: var(--fg); }
+      .error { color: #b91c1c; }
+      @media (max-width: 640px) {
+        .shell { padding-top: 1.2rem; }
+        .grid { grid-template-columns: 1fr; }
+        .row { flex-wrap: wrap; }
       }
     </style>
   </head>
   <body>
-    <main>
-      <section class="hero">
-        <div>
-          <p class="eyebrow">Generation ${status.generation}</p>
-          <h1>This sandbox has been alive for <span id="sandbox-counter">${sandboxUptime}</span></h1>
-          <p class="lede">
-            You are looking at the page served directly from the current Vercel Sandbox. It keeps its own heartbeat,
-            tracks the full chain age, and prepares a fresh snapshot-backed sibling before this sandbox times out.
-          </p>
-          ${redirectBanner}
+    <div class="shell">
+      <div class="row">
+        <div class="title">
+          <h1>Eternal Sandbox</h1>
+          <span class="badge">Gen ${status.generation}</span>
         </div>
-        <aside class="hero-panel">
-          <span class="pill">healthy</span>
-          <p class="meta">Sandbox ID: ${status.sandboxId ?? "unknown"}</p>
-          <p class="meta">Base snapshot: ${status.baseSnapshotId ?? "unknown"}</p>
-          <p class="meta">Next rotation in ${rotationCountdown}</p>
-          <a href="/status">Open live JSON status</a>
-        </aside>
-      </section>
+        <a class="btn-ghost btn" href="/status">Status JSON</a>
+      </div>
 
-      <section class="grid">
-        <article class="metric">
-          <p class="metric-label">Sandbox uptime</p>
-          <p class="metric-value" id="sandbox-uptime">${sandboxUptime}</p>
-          <p class="note">Fresh on every generation.</p>
-        </article>
-        <article class="metric">
-          <p class="metric-label">Chain uptime</p>
-          <p class="metric-value" id="chain-uptime">${chainUptime}</p>
-          <p class="note">Persists across handoffs.</p>
-        </article>
-        <article class="metric">
-          <p class="metric-label">Next handoff</p>
-          <p class="metric-value" id="rotation-countdown">${rotationCountdown}</p>
-          <p class="note">A new sandbox wakes before the timeout.</p>
-        </article>
-      </section>
+      <div class="counter">
+        <p class="label">This sandbox has been alive for</p>
+        <p class="value" id="sandbox-counter">${sandboxUptime}</p>
+        <p class="sub">Chain uptime <span id="chain-uptime">${chainUptime}</span> &middot; Next handoff <span id="rotation-countdown">${rotationCountdown}</span></p>
+        ${redirectNotice}
+      </div>
 
-      <section class="details">
-        <article class="detail">
-          <p class="detail-title">Runtime details</p>
-          <div class="detail-list">
-            <div><strong>Chain started</strong>${formatClock(status.genesisAt)}</div>
-            <div><strong>Last heartbeat</strong><span id="last-heartbeat">${formatClock(status.lastHeartbeatAt)}</span></div>
-            <div><strong>Heartbeat count</strong><span id="heartbeat-count">${status.heartbeatCount}</span></div>
-            <div><strong>Rotation state</strong><span id="rotation-state">${status.rotation.inProgress ? "Preparing successor" : "Steady"}</span></div>
-            <div><strong>Rotation error</strong><span id="rotation-error">${status.rotation.error ?? "None"}</span></div>
-          </div>
-        </article>
-        <article class="detail">
-          <p class="detail-title">Pulse strip</p>
-          <div class="pulse-strip" id="pulse-strip">${renderPulseBars(status)}</div>
-          <p class="copy">Each bar marks one internal heartbeat from this sandbox process.</p>
-        </article>
-      </section>
-    </main>
+      <div class="grid">
+        <div class="card">
+          <p class="label">Heartbeats</p>
+          <p class="num" id="heartbeat-count">${status.heartbeatCount}</p>
+        </div>
+        <div class="card">
+          <p class="label">Last heartbeat</p>
+          <p class="num" id="last-heartbeat">${formatClock(status.lastHeartbeatAt)}</p>
+        </div>
+      </div>
+
+      <div class="pulse-section">
+        <p class="pulse-label">Pulse</p>
+        <div class="pulse-wrap" id="pulse-strip">${renderPulseBars(status)}</div>
+      </div>
+
+      <div class="detail">
+        <div class="detail-row"><span class="dl">Sandbox ID</span><span class="dv">${status.sandboxId ?? "unknown"}</span></div>
+        <div class="detail-row"><span class="dl">Chain started</span><span class="dv">${formatClock(status.genesisAt)}</span></div>
+        ${status.rotation.error ? `<div class="detail-row"><span class="dl">Error</span><span class="dv error">${status.rotation.error}</span></div>` : ""}
+      </div>
+    </div>
 
     <script>
       const initialStatus = ${JSON.stringify(status)};
-      let latestStatus = initialStatus;
+      let s = initialStatus;
 
-      function formatDuration(ms) {
-        const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-        const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
-        const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
-        const seconds = String(totalSeconds % 60).padStart(2, "0");
-        return hours + ":" + minutes + ":" + seconds;
+      function fmt(ms) {
+        const t = Math.max(0, Math.floor(ms / 1000));
+        return String(Math.floor(t/3600)).padStart(2,"0") + ":" + String(Math.floor((t%3600)/60)).padStart(2,"0") + ":" + String(t%60).padStart(2,"0");
       }
 
-      function formatClock(timestamp) {
-        return new Intl.DateTimeFormat("en", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          month: "short",
-          day: "2-digit"
-        }).format(timestamp);
+      function clk(ts) {
+        return new Intl.DateTimeFormat("en", { hour:"2-digit", minute:"2-digit", second:"2-digit", month:"short", day:"2-digit" }).format(ts);
       }
 
-      function renderCounters() {
+      function tick() {
         const now = Date.now();
-        document.getElementById("sandbox-counter").textContent = formatDuration(now - latestStatus.sandboxStartedAt);
-        document.getElementById("sandbox-uptime").textContent = formatDuration(now - latestStatus.sandboxStartedAt);
-        document.getElementById("chain-uptime").textContent = formatDuration(now - latestStatus.genesisAt);
-        document.getElementById("rotation-countdown").textContent = formatDuration(Math.max(0, latestStatus.nextRotationAt - now));
+        document.getElementById("sandbox-counter").textContent = fmt(now - s.sandboxStartedAt);
+        document.getElementById("chain-uptime").textContent = fmt(now - s.genesisAt);
+        document.getElementById("rotation-countdown").textContent = fmt(Math.max(0, s.nextRotationAt - now));
       }
 
-      function renderPulseBars(history) {
-        const strip = document.getElementById("pulse-strip");
-        strip.innerHTML = history.slice(-24).map((pulse) => {
-          const height = 26 + Math.min(Math.abs(pulse.driftMs), 140) / 2;
-          return '<span class="pulse-bar pulse-' + pulse.phase + '" style="height:' + height + 'px"></span>';
+      function bars(h) {
+        document.getElementById("pulse-strip").innerHTML = h.slice(-24).map((p) => {
+          const ht = 12 + Math.min(Math.abs(p.driftMs), 200) / 4;
+          const c = p.phase === "steady" ? "pulse-steady" : p.phase === "handoff" ? "pulse-handoff" : "pulse-recovered";
+          return '<span class="pulse-bar ' + c + '" style="height:' + ht + 'px"></span>';
         }).join("");
       }
 
-      async function refreshStatus() {
+      async function refresh() {
         try {
-          const response = await fetch("/status", { cache: "no-store" });
-          if (!response.ok) {
-            return;
+          const r = await fetch("/status", { cache: "no-store" });
+          if (!r.ok) return;
+          s = await r.json();
+          document.getElementById("heartbeat-count").textContent = s.heartbeatCount;
+          document.getElementById("last-heartbeat").textContent = clk(s.lastHeartbeatAt);
+          bars(s.pulseHistory || []);
+          if (s.nextSandboxUrl && location.href !== s.nextSandboxUrl + "/") {
+            setTimeout(() => { location.href = s.nextSandboxUrl; }, 8000);
           }
-
-          latestStatus = await response.json();
-          document.getElementById("last-heartbeat").textContent = formatClock(latestStatus.lastHeartbeatAt);
-          document.getElementById("heartbeat-count").textContent = String(latestStatus.heartbeatCount);
-          document.getElementById("rotation-state").textContent = latestStatus.rotation.inProgress ? "Preparing successor" : "Steady";
-          document.getElementById("rotation-error").textContent = latestStatus.rotation.error || "None";
-          renderPulseBars(latestStatus.pulseHistory || []);
-
-          if (latestStatus.nextSandboxUrl && window.location.href !== latestStatus.nextSandboxUrl + "/") {
-            setTimeout(() => {
-              window.location.href = latestStatus.nextSandboxUrl;
-            }, 8000);
-          }
-        } catch {
-          // ignore refresh failures
-        }
+        } catch {}
       }
 
-      renderCounters();
-      setInterval(renderCounters, 1000);
-      refreshStatus();
-      setInterval(refreshStatus, 15000);
+      tick();
+      setInterval(tick, 1000);
+      refresh();
+      setInterval(refresh, 15000);
     </script>
   </body>
 </html>`;

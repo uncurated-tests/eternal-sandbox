@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { promises as fs } from "node:fs";
+import path from "node:path";
 
 import { Sandbox } from "@vercel/sandbox";
 
@@ -29,6 +31,9 @@ type SnapshotBootstrap = {
   snapshotId: string;
   repoRoot: string;
 };
+
+const LOCAL_SANDBOX_DIR = path.join(process.cwd(), "sandbox-site");
+
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,6 +115,47 @@ async function resolveRepoRoot(sandbox: Sandbox) {
 
   return (await resolver.stdout()).trim();
 }
+
+async function collectBundledSandboxFiles(dir: string): Promise<Array<{ path: string; content: Buffer }>> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const files: Array<{ path: string; content: Buffer }> = [];
+
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name === "runtime-state.json") {
+      continue;
+    }
+
+    const absolutePath = path.join(dir, entry.name);
+
+    if (entry.isDirectory()) {
+      files.push(...(await collectBundledSandboxFiles(absolutePath)));
+      continue;
+    }
+
+    files.push({
+      path: path.relative(LOCAL_SANDBOX_DIR, absolutePath).split(path.sep).join("/"),
+      content: await fs.readFile(absolutePath),
+    });
+  }
+
+  return files;
+}
+
+async function syncBundledSandboxSite(sandbox: Sandbox, repoRoot: string) {
+  const files = await collectBundledSandboxFiles(LOCAL_SANDBOX_DIR);
+
+  if (!files.length) {
+    return;
+  }
+
+  await sandbox.writeFiles(
+    files.map((file) => ({
+      path: `${repoRoot}/sandbox-site/${file.path}`,
+      content: file.content,
+    })),
+  );
+}
+
 
 async function fetchStatus(url: string) {
   const response = await fetch(`${url}/status`, {
@@ -224,6 +270,8 @@ async function createBaseSnapshot(): Promise<SnapshotBootstrap> {
   });
 
   const repoRoot = await resolveRepoRoot(builder);
+  await syncBundledSandboxSite(builder, repoRoot);
+
 
   const install = await builder.runCommand({
     cmd: "npm",

@@ -1,245 +1,201 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Activity, ArrowUpRight, Loader2 } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { ChainStatusResponse, PulsePoint } from "@/lib/types";
-
-type DashboardProps = {
-  initialStatus: ChainStatusResponse;
-};
 
 function formatDuration(ms: number) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600)
-    .toString()
-    .padStart(2, "0");
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  return `${hours}:${minutes}:${seconds}`;
+  const h = Math.floor(totalSeconds / 3600).toString().padStart(2, "0");
+  const m = Math.floor((totalSeconds % 3600) / 60).toString().padStart(2, "0");
+  const s = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${h}:${m}:${s}`;
 }
 
-function formatTime(timestamp: number | null) {
-  if (!timestamp) {
-    return "-";
-  }
-
-  return new Intl.DateTimeFormat("en", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    month: "short",
-    day: "2-digit",
-  }).format(timestamp);
+function formatTime(ts: number | null) {
+  if (!ts) return "-";
+  return new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", second: "2-digit", month: "short", day: "2-digit" }).format(ts);
 }
 
 function PulseStrip({ pulses }: { pulses: PulsePoint[] }) {
   const trimmed = pulses.slice(-24);
 
   if (!trimmed.length) {
-    return <div className="pulse-empty">No heartbeats captured yet.</div>;
+    return <p className="text-sm text-muted-foreground">Waiting for first heartbeat.</p>;
   }
 
   return (
-    <div className="pulse-strip" aria-hidden="true">
-      {trimmed.map((pulse) => {
-        const height = 26 + Math.min(Math.abs(pulse.driftMs), 140) / 2;
-        return (
-          <span
-            key={pulse.timestamp}
-            className={`pulse-bar pulse-${pulse.phase}`}
-            style={{ height }}
-            title={`${pulse.phase} ${pulse.driftMs}ms`}
-          />
-        );
-      })}
+    <div className="flex h-20 items-end gap-0.5" aria-hidden="true">
+      {trimmed.map((p) => (
+        <span
+          key={p.timestamp}
+          className={cn(
+            "min-w-1.5 flex-1 rounded-full",
+            p.phase === "steady" && "bg-foreground",
+            p.phase === "handoff" && "bg-muted-foreground/50",
+            p.phase === "recovered" && "bg-muted-foreground",
+          )}
+          style={{ height: 12 + Math.min(Math.abs(p.driftMs), 200) / 4 }}
+        />
+      ))}
     </div>
   );
 }
 
-export function ChainDashboard({ initialStatus }: DashboardProps) {
+export function ChainDashboard({ initialStatus }: { initialStatus: ChainStatusResponse }) {
   const [status, setStatus] = useState(initialStatus);
   const [now, setNow] = useState(Date.now());
-  const [isBootstrapping, setIsBootstrapping] = useState(false);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [booting, setBooting] = useState(false);
+  const [bootErr, setBootErr] = useState<string | null>(null);
 
   useEffect(() => {
-    const tick = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(tick);
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
-    const refresh = async () => {
+    const go = async () => {
       try {
-        const response = await fetch("/api/chain", { cache: "no-store" });
-        const next = (await response.json()) as ChainStatusResponse;
-        setStatus(next);
-      } catch {
-        // Ignore transient refresh failures.
-      }
+        const r = await fetch("/api/chain", { cache: "no-store" });
+        setStatus((await r.json()) as ChainStatusResponse);
+      } catch { /* ignore */ }
     };
-
-    refresh();
-    const timer = window.setInterval(refresh, 15_000);
-    return () => window.clearInterval(timer);
+    go();
+    const t = setInterval(go, 15_000);
+    return () => clearInterval(t);
   }, []);
 
-  const current = status.current;
+  const c = status.current;
 
-  const metrics = useMemo(() => {
-    if (!current) {
-      return null;
-    }
-
-    const sandboxUptimeMs = now - current.status.sandboxStartedAt;
-    const chainUptimeMs = now - current.status.genesisAt;
-    const rotationCountdown = Math.max(0, current.status.nextRotationAt - now);
-
+  const m = useMemo(() => {
+    if (!c) return null;
     return {
-      sandboxUptimeMs,
-      chainUptimeMs,
-      rotationCountdown,
+      sandbox: now - c.status.sandboxStartedAt,
+      chain: now - c.status.genesisAt,
+      handoff: Math.max(0, c.status.nextRotationAt - now),
     };
-  }, [current, now]);
+  }, [c, now]);
 
-  const handleBootstrap = async () => {
-    setBootstrapError(null);
-    setIsBootstrapping(true);
-
+  const boot = async () => {
+    setBootErr(null);
+    setBooting(true);
     try {
-      const response = await fetch("/api/bootstrap", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-
-      const payload = (await response.json()) as ChainStatusResponse;
-      if (!response.ok) {
-        throw new Error(payload.note ?? "The sandbox chain could not be started.");
-      }
-
-      setStatus(payload);
-    } catch (error) {
-      setBootstrapError(error instanceof Error ? error.message : "The sandbox chain could not be started.");
+      const r = await fetch("/api/bootstrap", { method: "POST", headers: { "content-type": "application/json" } });
+      const p = (await r.json()) as ChainStatusResponse;
+      if (!r.ok) throw new Error(p.note ?? "Failed to start.");
+      setStatus(p);
+    } catch (e) {
+      setBootErr(e instanceof Error ? e.message : "Failed to start.");
     } finally {
-      setIsBootstrapping(false);
+      setBooting(false);
     }
   };
 
   return (
-    <main className="shell">
-      <section className="hero-card">
-        <div className="hero-copy">
-          <p className="eyebrow">Self-rotating sandbox chain</p>
-          <h1>Eternal Sandbox</h1>
-          <p className="lede">
-            A live Vercel Sandbox page that keeps passing the baton to a fresh snapshot-backed sibling before
-            timeout, while this control surface tracks the currently alive generation.
-          </p>
-        </div>
-
-        <div className="hero-panel">
-          <div className={`status-pill ${status.healthy ? "is-healthy" : "is-waiting"}`}>
+    <main className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-10 sm:px-6 sm:py-14">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <h1 className="text-lg font-semibold tracking-tight">Eternal Sandbox</h1>
+          <Badge
+            variant="outline"
+            className={cn(
+              "rounded-full px-2.5 py-0.5 text-[11px] uppercase tracking-widest",
+              status.healthy
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-border text-muted-foreground",
+            )}
+          >
             {status.healthy ? "Live" : "Idle"}
-          </div>
-          <p className="panel-caption">Checked {formatTime(Date.parse(status.checkedAt))}</p>
-          {current ? (
-            <a className="panel-link" href={current.sandboxUrl} target="_blank" rel="noreferrer">
-              Open current sandbox page
-            </a>
-          ) : (
-            <button className="panel-link button-reset" onClick={handleBootstrap} disabled={isBootstrapping}>
-              {isBootstrapping ? "Launching chain..." : "Launch sandbox chain"}
-            </button>
-          )}
-          {bootstrapError ? <p className="error-text">{bootstrapError}</p> : null}
+          </Badge>
         </div>
-      </section>
 
-      {current && metrics ? (
+        {c ? (
+          <Button asChild size="sm">
+            <a href={c.sandboxUrl} target="_blank" rel="noreferrer">
+              Open sandbox <ArrowUpRight className="size-3.5" />
+            </a>
+          </Button>
+        ) : (
+          <Button size="sm" onClick={boot} disabled={booting}>
+            {booting ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
+            {booting ? "Launching..." : "Launch chain"}
+          </Button>
+        )}
+      </div>
+
+      {bootErr && <p className="text-sm text-destructive">{bootErr}</p>}
+
+      {c && m ? (
         <>
-          <section className="counter-grid">
-            <article className="metric-card accent-coral">
-              <p className="metric-label">Sandbox alive for</p>
-              <p className="metric-value">{formatDuration(metrics.sandboxUptimeMs)}</p>
-              <p className="metric-meta">Generation {current.status.generation}</p>
-            </article>
-
-            <article className="metric-card accent-cyan">
-              <p className="metric-label">Chain alive for</p>
-              <p className="metric-value">{formatDuration(metrics.chainUptimeMs)}</p>
-              <p className="metric-meta">Started {formatTime(current.status.genesisAt)}</p>
-            </article>
-
-            <article className="metric-card accent-gold">
-              <p className="metric-label">Next handoff in</p>
-              <p className="metric-value">{formatDuration(metrics.rotationCountdown)}</p>
-              <p className="metric-meta">Rotates before sandbox timeout hits</p>
-            </article>
+          {/* ── Counters ── */}
+          <section className="grid grid-cols-3 gap-4">
+            {([
+              ["Sandbox uptime", formatDuration(m.sandbox)],
+              ["Chain uptime", formatDuration(m.chain)],
+              ["Next handoff", formatDuration(m.handoff)],
+            ] as const).map(([label, value]) => (
+              <Card key={label}>
+                <CardContent className="px-4 py-4">
+                  <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">{label}</p>
+                  <p className="mt-2 font-mono text-2xl font-semibold tracking-tight sm:text-3xl">{value}</p>
+                </CardContent>
+              </Card>
+            ))}
           </section>
 
-          <section className="detail-grid">
-            <article className="detail-card">
-              <p className="detail-title">Live chain details</p>
-              <dl className="detail-list">
-                <div>
-                  <dt>Sandbox ID</dt>
-                  <dd>{current.status.sandboxId ?? current.sandboxId}</dd>
-                </div>
-                <div>
-                  <dt>Base snapshot</dt>
-                  <dd>{current.status.baseSnapshotId ?? "unknown"}</dd>
-                </div>
-                <div>
-                  <dt>Heartbeat count</dt>
-                  <dd>{current.status.heartbeatCount}</dd>
-                </div>
-                <div>
-                  <dt>Last heartbeat</dt>
-                  <dd>{formatTime(current.status.lastHeartbeatAt)}</dd>
-                </div>
-              </dl>
-            </article>
+          {/* ── Details + Pulse ── */}
+          <section className="grid gap-4 sm:grid-cols-2">
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Details</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <Row label="Generation" value={String(c.status.generation)} />
+                <Row label="Heartbeats" value={String(c.status.heartbeatCount)} />
+                <Row label="Last heartbeat" value={formatTime(c.status.lastHeartbeatAt)} />
+                <Row label="Sandbox ID" value={c.status.sandboxId ?? c.sandboxId} truncate />
+                {c.status.rotation.error && (
+                  <p className="text-destructive">{c.status.rotation.error}</p>
+                )}
+              </CardContent>
+            </Card>
 
-            <article className="detail-card pulse-card">
-              <p className="detail-title">Pulse strip</p>
-              <PulseStrip pulses={current.status.pulseHistory} />
-              <p className="pulse-note">Each bar is an internal heartbeat from the currently live sandbox.</p>
-            </article>
-
-            <article className="detail-card handoff-card">
-              <p className="detail-title">Handoff state</p>
-              <p className="handoff-copy">
-                {current.status.nextSandboxUrl
-                  ? "A replacement sandbox is ready. The live page will redirect visitors toward it before shutdown."
-                  : current.status.rotation.inProgress
-                    ? "The current sandbox is preparing its successor from the base snapshot."
-                    : "The current sandbox is steady and has not started the next handoff yet."}
-              </p>
-              {current.status.nextSandboxUrl ? (
-                <a className="panel-link compact-link" href={current.status.nextSandboxUrl} target="_blank" rel="noreferrer">
-                  Open next sandbox
-                </a>
-              ) : null}
-              {current.status.rotation.error ? <p className="error-text">{current.status.rotation.error}</p> : null}
-            </article>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-sm">Pulse</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <PulseStrip pulses={c.status.pulseHistory} />
+              </CardContent>
+            </Card>
           </section>
         </>
       ) : (
-        <section className="empty-state">
-          <p className="empty-title">No sandbox chain is running yet.</p>
-          <p className="empty-copy">
-            Launch the chain and this page will start tracking the live sandbox counter, heartbeat pulse, and the
-            upcoming snapshot handoff.
-          </p>
-          <button className="empty-button" onClick={handleBootstrap} disabled={isBootstrapping}>
-            {isBootstrapping ? "Starting sandbox..." : "Start the first sandbox"}
-          </button>
-          {status.note ? <p className="empty-note">{status.note}</p> : null}
-        </section>
+        <Card>
+          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+            <p className="text-sm text-muted-foreground">No sandbox chain is running. Launch one to start the live counter.</p>
+            <Button size="sm" onClick={boot} disabled={booting}>
+              {booting ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
+              {booting ? "Starting..." : "Start chain"}
+            </Button>
+          </CardContent>
+        </Card>
       )}
     </main>
+  );
+}
+
+function Row({ label, value, truncate }: { label: string; value: string; truncate?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span className={cn("text-right", truncate && "max-w-[180px] truncate")}>{value}</span>
+    </div>
   );
 }
