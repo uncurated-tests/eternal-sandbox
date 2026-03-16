@@ -13,7 +13,6 @@ const HANDOFF_REDIRECT_GRACE_MS = 20_000;
 
 const authKeys = [
   "VERCEL_OIDC_TOKEN",
-  "VERCEL_ACCESS_TOKEN",
   "VERCEL_PROJECT_ID",
   "VERCEL_TEAM_ID",
   "VERCEL_PROJECT_PRODUCTION_URL",
@@ -202,12 +201,19 @@ function scheduleRotation() {
 }
 
 function buildAuthEnv() {
-  return authKeys.reduce((env, key) => {
+  const env = authKeys.reduce((carry, key) => {
     if (process.env[key]) {
-      env[key] = process.env[key];
+      carry[key] = process.env[key];
     }
-    return env;
+    return carry;
   }, {});
+
+  const token = process.env.VERCEL_TOKEN ?? process.env.VERCEL_ACCESS_TOKEN;
+  if (token) {
+    env.VERCEL_TOKEN = token;
+  }
+
+  return env;
 }
 
 async function rotateChain(reason) {

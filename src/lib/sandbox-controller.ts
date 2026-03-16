@@ -45,20 +45,24 @@ function normalizeSandboxUrl(url: string) {
 
 function getAuthEnv() {
   const env: Record<string, string> = {};
-  const keys = [
+  const passthroughKeys = [
     "VERCEL_OIDC_TOKEN",
-    "VERCEL_ACCESS_TOKEN",
     "VERCEL_PROJECT_ID",
     "VERCEL_TEAM_ID",
     "VERCEL_PROJECT_PRODUCTION_URL",
     "VERCEL_URL",
   ];
 
-  for (const key of keys) {
+  for (const key of passthroughKeys) {
     const value = process.env[key];
     if (value) {
       env[key] = value;
     }
+  }
+
+  const token = process.env.VERCEL_TOKEN ?? process.env.VERCEL_ACCESS_TOKEN;
+  if (token) {
+    env.VERCEL_TOKEN = token;
   }
 
   return env;
