@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 const APP_PORT = Number(process.env.APP_PORT ?? 3000);
-const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS ?? 40 * 60 * 1000);
+const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS ?? 4 * 60 * 60 * 1000);
 const ROTATION_LEAD_MS = Number(process.env.ROTATION_LEAD_MS ?? 5 * 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS ?? 15 * 1000);
 const REPO_ROOT = process.env.REPO_ROOT ?? process.cwd();

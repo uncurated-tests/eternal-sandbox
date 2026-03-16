@@ -10,7 +10,7 @@ import type {
 } from "@/lib/types";
 
 const SANDBOX_PORT = Number(process.env.SANDBOX_PORT ?? 3000);
-const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS ?? 40 * 60 * 1000);
+const SANDBOX_TIMEOUT_MS = Number(process.env.SANDBOX_TIMEOUT_MS ?? 4 * 60 * 60 * 1000);
 const ROTATION_LEAD_MS = Number(process.env.ROTATION_LEAD_MS ?? 5 * 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS ?? 15 * 1000);
 const BUILDER_TIMEOUT_MS = Number(process.env.BUILDER_TIMEOUT_MS ?? 10 * 60 * 1000);
