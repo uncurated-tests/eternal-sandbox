@@ -1,0 +1,12 @@
+{
+  "name": "eternal-sandbox-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@vercel/sandbox": "1.8.1"
+  }
+}
