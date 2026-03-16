@@ -45,25 +45,32 @@ server.listen(APP_PORT, () => {
 });
 
 // ── state ──
-
 async function loadOrCreateState() {
+  let base = {};
+
   try {
-    const existing = JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
-    return normalizeState(existing);
+    base = JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
   } catch {
-    return normalizeState({
-      chainId: process.env.CHAIN_ID ?? randomUUID(),
-      generation: Number(process.env.GENERATION ?? 1),
-      genesisAt: Number(process.env.GENESIS_AT ?? Date.now()),
-      sandboxStartedAt: Date.now(),
-      lastHeartbeatAt: Date.now(),
-      heartbeatCount: 0,
-      pulseHistory: [],
-      currentSandboxId: process.env.CURRENT_SANDBOX_ID ?? null,
-      sourceSnapshotId: process.env.SOURCE_SNAPSHOT_ID ?? null,
-      nextRotationAt: Date.now() + Math.max(30_000, SANDBOX_TIMEOUT_MS - ROTATION_LEAD_MS),
-    });
+    // no existing state file
   }
+
+  // Env vars from the controller always win for identity fields.
+  // This ensures a freshly rotated sandbox picks up its new generation
+  // even though the snapshot carried the previous generation's state file.
+  return normalizeState({
+    ...base,
+    chainId: process.env.CHAIN_ID ?? base.chainId ?? randomUUID(),
+    generation: Number(process.env.GENERATION ?? base.generation ?? 1),
+    genesisAt: Number(process.env.GENESIS_AT ?? base.genesisAt ?? Date.now()),
+    currentSandboxId: process.env.CURRENT_SANDBOX_ID ?? base.currentSandboxId ?? null,
+    sourceSnapshotId: process.env.SOURCE_SNAPSHOT_ID ?? base.sourceSnapshotId ?? null,
+    // Always reset sandbox-specific fields on a new boot
+    sandboxStartedAt: Date.now(),
+    lastHeartbeatAt: Date.now(),
+    heartbeatCount: 0,
+    pulseHistory: Array.isArray(base.pulseHistory) ? base.pulseHistory.slice(-24) : [],
+    nextRotationAt: Date.now() + Math.max(30_000, SANDBOX_TIMEOUT_MS - ROTATION_LEAD_MS),
+  });
 }
 
 function normalizeState(input) {
