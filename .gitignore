@@ -12,3 +12,5 @@ yarn-error.log*
 pnpm-debug.log*
 *.tsbuildinfo
 
+.vercel
+.env*.local

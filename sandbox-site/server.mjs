@@ -20,6 +20,11 @@ const authKeys = [
   "VERCEL_URL",
 ];
 
+function normalizeSandboxUrl(url) {
+  return url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+}
+
+
 let state = await loadOrCreateState();
 let rotationTimer = null;
 let stopTimer = null;
@@ -262,7 +267,7 @@ async function rotateChain(reason) {
       },
     });
 
-    const nextSandboxUrl = `https://${nextSandbox.domain(APP_PORT)}`;
+    const nextSandboxUrl = normalizeSandboxUrl(nextSandbox.domain(APP_PORT));
     await waitForReady(nextSandboxUrl);
 
     state.nextSandboxId = nextSandbox.sandboxId;

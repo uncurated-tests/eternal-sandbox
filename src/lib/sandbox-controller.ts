@@ -38,6 +38,11 @@ function getSandboxId(candidate: ListedSandbox) {
   return candidate.sandboxId ?? candidate.id ?? null;
 }
 
+function normalizeSandboxUrl(url: string) {
+  return url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+}
+
+
 function getAuthEnv() {
   const env: Record<string, string> = {};
   const keys = [
@@ -140,7 +145,7 @@ async function probeSandbox(summary: ListedSandbox) {
 
   try {
     const sandbox = await Sandbox.get({ sandboxId });
-    const sandboxUrl = `https://${sandbox.domain(SANDBOX_PORT)}`;
+    const sandboxUrl = normalizeSandboxUrl(sandbox.domain(SANDBOX_PORT));
     const status = await fetchStatus(sandboxUrl);
 
     return {
@@ -266,7 +271,7 @@ async function launchFromSnapshot(input: SnapshotBootstrap): Promise<BootstrapRe
     },
   });
 
-  const sandboxUrl = `https://${liveSandbox.domain(SANDBOX_PORT)}`;
+  const sandboxUrl = normalizeSandboxUrl(liveSandbox.domain(SANDBOX_PORT));
   const status = await waitForStatus(sandboxUrl);
 
   return {
