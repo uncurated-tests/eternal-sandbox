@@ -159,10 +159,8 @@ export function ChainDashboard({ initialStatus }: { initialStatus: ChainStatusRe
                 <Row label="Generation" value={String(c.status.generation)} />
                 <Row label="Heartbeats" value={String(c.status.heartbeatCount)} />
                 <Row label="Last heartbeat" value={formatTime(c.status.lastHeartbeatAt)} />
+                <Row label="Source snapshot" value={c.status.sourceSnapshotId ?? "unknown"} truncate />
                 <Row label="Sandbox ID" value={c.status.sandboxId ?? c.sandboxId} truncate />
-                {c.status.rotation.error && (
-                  <p className="text-destructive">{c.status.rotation.error}</p>
-                )}
               </CardContent>
             </Card>
 
@@ -175,6 +173,36 @@ export function ChainDashboard({ initialStatus }: { initialStatus: ChainStatusRe
               </CardContent>
             </Card>
           </section>
+
+          {/* ── Explainer ── */}
+          <details className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
+            <summary className="cursor-pointer font-medium text-foreground select-none">
+              How does this work?
+            </summary>
+            <div className="mt-3 space-y-2 leading-relaxed text-muted-foreground">
+              <p>This project runs a single dedicated sandbox chain. The controller (this Vercel app) manages the lifecycle.</p>
+              <p>
+                <strong className="text-foreground">Bootstrap:</strong> If no sandbox is running, the controller looks for the newest
+                Vercel Sandbox snapshot in this project. If one exists, it boots from that snapshot. If none exist yet, it creates an
+                initial base snapshot from the GitHub repo.
+              </p>
+              <p>
+                <strong className="text-foreground">Rotation:</strong> A cron job calls <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">POST /api/rotate</code> every
+                5 minutes. When the live sandbox enters the handoff window, the controller snapshots it. That snapshot captures the
+                full filesystem state. The old sandbox stops automatically. A new sandbox boots from that fresh snapshot.
+              </p>
+              <p>
+                <strong className="text-foreground">Persistence:</strong> Because rotation snapshots capture the entire disk, any files
+                you create or modify (including installed packages) carry over to the next generation. This is checkpoint-based
+                persistence, not a continuously durable disk. If the sandbox crashes before rotation, writes since the last snapshot
+                are lost.
+              </p>
+              <p>
+                <strong className="text-foreground">Retention:</strong> The controller keeps the 3 most recent snapshots and prunes
+                older ones after each successful rotation.
+              </p>
+            </div>
+          </details>
         </>
       ) : (
         <Card>

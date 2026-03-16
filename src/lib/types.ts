@@ -9,7 +9,7 @@ export type SandboxRuntimeStatus = {
   chainId: string;
   generation: number;
   sandboxId: string | null;
-  baseSnapshotId: string | null;
+  sourceSnapshotId: string | null;
   sandboxStartedAt: number;
   sandboxUptimeMs: number;
   genesisAt: number;
@@ -18,14 +18,6 @@ export type SandboxRuntimeStatus = {
   heartbeatCount: number;
   nextRotationAt: number;
   msUntilRotation: number;
-  nextSandboxUrl: string | null;
-  nextSandboxId: string | null;
-  rotation: {
-    inProgress: boolean;
-    lastAttemptAt: number | null;
-    lastSuccessAt: number | null;
-    error: string | null;
-  };
   pulseHistory: PulsePoint[];
 };
 
@@ -53,4 +45,17 @@ export type BootstrapResponse = {
   sandboxUrl: string;
   repoRoot: string;
   status: SandboxRuntimeStatus;
+};
+
+export type RotateResponse = {
+  rotated: boolean;
+  checkedAt: string;
+  note: string | null;
+  previousSandboxId: string | null;
+  previousSnapshotId: string | null;
+  newSandboxId: string | null;
+  newSandboxUrl: string | null;
+  newSnapshotId: string | null;
+  generation: number;
+  prunedSnapshots: string[];
 };

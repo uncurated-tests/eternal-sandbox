@@ -9,35 +9,12 @@ const ROTATION_LEAD_MS = Number(process.env.ROTATION_LEAD_MS ?? 5 * 60 * 1000);
 const HEARTBEAT_INTERVAL_MS = Number(process.env.HEARTBEAT_INTERVAL_MS ?? 15 * 1000);
 const REPO_ROOT = process.env.REPO_ROOT ?? process.cwd();
 const STATE_FILE = path.join(REPO_ROOT, "sandbox-site", "runtime-state.json");
-const HANDOFF_REDIRECT_GRACE_MS = 20_000;
-
-const authKeys = [
-  "VERCEL_OIDC_TOKEN",
-  "VERCEL_PROJECT_ID",
-  "VERCEL_TEAM_ID",
-  "VERCEL_PROJECT_PRODUCTION_URL",
-  "VERCEL_URL",
-];
-
-function normalizeSandboxUrl(url) {
-  return url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
-}
-
 
 let state = await loadOrCreateState();
-let rotationTimer = null;
-let stopTimer = null;
-
 await persistState();
-scheduleRotation();
 
 setInterval(async () => {
   await recordHeartbeat();
-  if (!state.rotation.inProgress && Date.now() >= state.nextRotationAt) {
-    rotateChain("heartbeat-threshold").catch((error) => {
-      console.error("Rotation attempt failed", error);
-    });
-  }
 }, HEARTBEAT_INTERVAL_MS).unref();
 
 const server = createServer(async (request, response) => {
@@ -67,45 +44,25 @@ server.listen(APP_PORT, () => {
   console.log(`Eternal sandbox page is listening on :${APP_PORT}`);
 });
 
+// ── state ──
+
 async function loadOrCreateState() {
   try {
     const existing = JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
     return normalizeState(existing);
   } catch {
-    const resumeState = decodeResumeState();
     return normalizeState({
-      chainId: process.env.CHAIN_ID ?? resumeState.chainId ?? randomUUID(),
-      generation: Number(process.env.GENERATION ?? resumeState.generation ?? 1),
-      genesisAt: Number(process.env.GENESIS_AT ?? resumeState.genesisAt ?? Date.now()),
+      chainId: process.env.CHAIN_ID ?? randomUUID(),
+      generation: Number(process.env.GENERATION ?? 1),
+      genesisAt: Number(process.env.GENESIS_AT ?? Date.now()),
       sandboxStartedAt: Date.now(),
       lastHeartbeatAt: Date.now(),
-      heartbeatCount: Number(resumeState.heartbeatCount ?? 0),
-      pulseHistory: resumeState.pulseHistory ?? [],
+      heartbeatCount: 0,
+      pulseHistory: [],
       currentSandboxId: process.env.CURRENT_SANDBOX_ID ?? null,
-      baseSnapshotId: process.env.BASE_SNAPSHOT_ID ?? null,
-      nextSandboxUrl: null,
-      nextSandboxId: null,
+      sourceSnapshotId: process.env.SOURCE_SNAPSHOT_ID ?? null,
       nextRotationAt: Date.now() + Math.max(30_000, SANDBOX_TIMEOUT_MS - ROTATION_LEAD_MS),
-      rotation: {
-        inProgress: false,
-        lastAttemptAt: null,
-        lastSuccessAt: null,
-        error: null,
-      },
     });
-  }
-}
-
-function decodeResumeState() {
-  const encoded = process.env.CHAIN_STATE_B64;
-  if (!encoded) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
-  } catch {
-    return {};
   }
 }
 
@@ -122,16 +79,8 @@ function normalizeState(input) {
     heartbeatCount: Number(input.heartbeatCount ?? 0),
     pulseHistory: Array.isArray(input.pulseHistory) ? input.pulseHistory.slice(-48) : [],
     currentSandboxId: input.currentSandboxId ?? process.env.CURRENT_SANDBOX_ID ?? null,
-    baseSnapshotId: input.baseSnapshotId ?? process.env.BASE_SNAPSHOT_ID ?? null,
-    nextSandboxUrl: input.nextSandboxUrl ?? null,
-    nextSandboxId: input.nextSandboxId ?? null,
+    sourceSnapshotId: input.sourceSnapshotId ?? process.env.SOURCE_SNAPSHOT_ID ?? null,
     nextRotationAt,
-    rotation: {
-      inProgress: Boolean(input.rotation?.inProgress),
-      lastAttemptAt: input.rotation?.lastAttemptAt ?? null,
-      lastSuccessAt: input.rotation?.lastSuccessAt ?? null,
-      error: input.rotation?.error ?? null,
-    },
   };
 }
 
@@ -140,7 +89,7 @@ async function persistState() {
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
-async function recordHeartbeat(phase = state.rotation.inProgress ? "handoff" : "steady") {
+async function recordHeartbeat() {
   const now = Date.now();
   const expected = state.lastHeartbeatAt + HEARTBEAT_INTERVAL_MS;
   const driftMs = state.heartbeatCount === 0 ? 0 : now - expected;
@@ -149,15 +98,13 @@ async function recordHeartbeat(phase = state.rotation.inProgress ? "handoff" : "
   state.heartbeatCount += 1;
   state.pulseHistory = [
     ...state.pulseHistory,
-    {
-      timestamp: now,
-      driftMs,
-      phase,
-    },
+    { timestamp: now, driftMs, phase: "steady" },
   ].slice(-48);
 
   await persistState();
 }
+
+// ── status ──
 
 function buildStatusPayload() {
   const now = Date.now();
@@ -167,7 +114,7 @@ function buildStatusPayload() {
     chainId: state.chainId,
     generation: state.generation,
     sandboxId: state.currentSandboxId,
-    baseSnapshotId: state.baseSnapshotId,
+    sourceSnapshotId: state.sourceSnapshotId,
     sandboxStartedAt: state.sandboxStartedAt,
     sandboxUptimeMs: now - state.sandboxStartedAt,
     genesisAt: state.genesisAt,
@@ -176,9 +123,6 @@ function buildStatusPayload() {
     heartbeatCount: state.heartbeatCount,
     nextRotationAt: state.nextRotationAt,
     msUntilRotation: Math.max(0, state.nextRotationAt - now),
-    nextSandboxUrl: state.nextSandboxUrl,
-    nextSandboxId: state.nextSandboxId,
-    rotation: state.rotation,
     pulseHistory: state.pulseHistory,
   };
 }
@@ -188,158 +132,7 @@ function respondJson(response, payload) {
   response.end(JSON.stringify(payload));
 }
 
-function scheduleRotation() {
-  const waitMs = Math.max(5_000, state.nextRotationAt - Date.now());
-  clearTimeout(rotationTimer);
-  rotationTimer = setTimeout(() => {
-    rotateChain("scheduled").catch((error) => {
-      console.error("Scheduled rotation failed", error);
-    });
-  }, waitMs);
-
-  rotationTimer.unref?.();
-}
-
-function buildAuthEnv() {
-  const env = authKeys.reduce((carry, key) => {
-    if (process.env[key]) {
-      carry[key] = process.env[key];
-    }
-    return carry;
-  }, {});
-
-  const token = process.env.VERCEL_TOKEN ?? process.env.VERCEL_ACCESS_TOKEN;
-  if (token) {
-    env.VERCEL_TOKEN = token;
-  }
-
-  return env;
-}
-
-async function rotateChain(reason) {
-  if (state.rotation.inProgress || !state.baseSnapshotId) {
-    return;
-  }
-
-  state.rotation.inProgress = true;
-  state.rotation.lastAttemptAt = Date.now();
-  state.rotation.error = null;
-  await recordHeartbeat("handoff");
-
-  try {
-    const { Sandbox } = await import("@vercel/sandbox");
-
-    const nextSandbox = await Sandbox.create({
-      source: {
-        type: "snapshot",
-        snapshotId: state.baseSnapshotId,
-      },
-      runtime: "node24",
-      ports: [APP_PORT],
-      timeout: SANDBOX_TIMEOUT_MS,
-      env: {
-        APP_PORT: String(APP_PORT),
-        BASE_SNAPSHOT_ID: state.baseSnapshotId,
-        SANDBOX_TIMEOUT_MS: String(SANDBOX_TIMEOUT_MS),
-        ROTATION_LEAD_MS: String(ROTATION_LEAD_MS),
-        HEARTBEAT_INTERVAL_MS: String(HEARTBEAT_INTERVAL_MS),
-        CHAIN_ID: state.chainId,
-        GENESIS_AT: String(state.genesisAt),
-        GENERATION: String(state.generation + 1),
-        REPO_ROOT,
-        ...buildAuthEnv(),
-      },
-    });
-
-    const resumeState = Buffer.from(
-      JSON.stringify({
-        chainId: state.chainId,
-        generation: state.generation + 1,
-        genesisAt: state.genesisAt,
-        heartbeatCount: state.heartbeatCount,
-        pulseHistory: state.pulseHistory.slice(-24),
-      }),
-      "utf8",
-    ).toString("base64url");
-
-    await nextSandbox.runCommand({
-      cmd: "node",
-      args: ["sandbox-site/server.mjs"],
-      cwd: REPO_ROOT,
-      detached: true,
-      env: {
-        CURRENT_SANDBOX_ID: nextSandbox.sandboxId,
-        CHAIN_STATE_B64: resumeState,
-      },
-    });
-
-    const nextSandboxUrl = normalizeSandboxUrl(nextSandbox.domain(APP_PORT));
-    await waitForReady(nextSandboxUrl);
-
-    state.nextSandboxId = nextSandbox.sandboxId;
-    state.nextSandboxUrl = nextSandboxUrl;
-    state.rotation.inProgress = false;
-    state.rotation.lastSuccessAt = Date.now();
-    state.rotation.error = null;
-    state.pulseHistory = [
-      ...state.pulseHistory,
-      {
-        timestamp: Date.now(),
-        driftMs: 0,
-        phase: "recovered",
-      },
-    ].slice(-48);
-
-    await persistState();
-
-    clearTimeout(stopTimer);
-    stopTimer = setTimeout(async () => {
-      try {
-        const currentSandboxId = state.currentSandboxId;
-        if (!currentSandboxId) {
-          process.exit(0);
-          return;
-        }
-
-        const currentSandbox = await Sandbox.get({ sandboxId: currentSandboxId });
-        await currentSandbox.stop();
-      } catch (error) {
-        console.error("Could not stop the previous sandbox", error);
-      }
-    }, HANDOFF_REDIRECT_GRACE_MS);
-
-    stopTimer.unref?.();
-    console.log(`Handoff ${reason} -> ${nextSandboxUrl}`);
-  } catch (error) {
-    state.rotation.inProgress = false;
-    state.rotation.error = error instanceof Error ? error.message : "Rotation failed.";
-    await persistState();
-    scheduleRotation();
-  }
-}
-
-async function waitForReady(url) {
-  let lastError = null;
-
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    try {
-      const response = await fetch(`${url}/status`, {
-        signal: AbortSignal.timeout(4_000),
-        cache: "no-store",
-      });
-
-      if (response.ok) {
-        return;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-  }
-
-  throw lastError instanceof Error ? lastError : new Error("Next sandbox did not become ready in time.");
-}
+// ── rendering ──
 
 function formatDuration(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -364,8 +157,7 @@ function renderPulseBars(status) {
     .slice(-24)
     .map((pulse) => {
       const height = 12 + Math.min(Math.abs(pulse.driftMs), 200) / 4;
-      const cls = pulse.phase === "steady" ? "pulse-steady" : pulse.phase === "handoff" ? "pulse-handoff" : "pulse-recovered";
-      return `<span class="pulse-bar ${cls}" style="height:${height}px"></span>`;
+      return `<span class="pulse-bar pulse-${pulse.phase}" style="height:${height}px"></span>`;
     })
     .join("");
 }
@@ -374,9 +166,6 @@ function renderPage(status) {
   const sandboxUptime = formatDuration(status.sandboxUptimeMs);
   const chainUptime = formatDuration(status.chainUptimeMs);
   const rotationCountdown = formatDuration(status.msUntilRotation);
-  const redirectNotice = status.nextSandboxUrl
-    ? `<p class="note">Next sandbox is ready. <a class="link" href="${status.nextSandboxUrl}">Jump now</a></p>`
-    : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -415,9 +204,7 @@ function renderPage(status) {
         background: var(--fg); color: var(--bg); text-decoration: none; border: none; cursor: pointer;
       }
       .btn-ghost { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
-      .counter {
-        margin-top: 2rem; text-align: center;
-      }
+      .counter { margin-top: 2rem; text-align: center; }
       .counter .label {
         font-size: 0.7rem; font-weight: 600; letter-spacing: 0.14em;
         text-transform: uppercase; color: var(--muted-fg);
@@ -428,9 +215,7 @@ function renderPage(status) {
         font-size: clamp(2.8rem, 8vw, 4.5rem); font-weight: 600;
         letter-spacing: -0.06em; line-height: 1;
       }
-      .counter .sub {
-        margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted-fg);
-      }
+      .counter .sub { margin-top: 0.6rem; font-size: 0.85rem; color: var(--muted-fg); }
       .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; margin-top: 1.5rem; }
       .card {
         border: 1px solid var(--border); border-radius: 0.75rem;
@@ -488,7 +273,6 @@ function renderPage(status) {
         <p class="label">This sandbox has been alive for</p>
         <p class="value" id="sandbox-counter">${sandboxUptime}</p>
         <p class="sub">Chain uptime <span id="chain-uptime">${chainUptime}</span> &middot; Next handoff <span id="rotation-countdown">${rotationCountdown}</span></p>
-        ${redirectNotice}
       </div>
 
       <div class="grid">
@@ -509,9 +293,14 @@ function renderPage(status) {
 
       <div class="detail">
         <div class="detail-row"><span class="dl">Sandbox ID</span><span class="dv">${status.sandboxId ?? "unknown"}</span></div>
+        <div class="detail-row"><span class="dl">Source snapshot</span><span class="dv">${status.sourceSnapshotId ?? "unknown"}</span></div>
         <div class="detail-row"><span class="dl">Chain started</span><span class="dv">${formatClock(status.genesisAt)}</span></div>
-        ${status.rotation.error ? `<div class="detail-row"><span class="dl">Error</span><span class="dv error">${status.rotation.error}</span></div>` : ""}
       </div>
+
+      <p class="note">
+        Filesystem changes persist across generations. When this sandbox rotates, the controller snapshots
+        its full disk state and boots the next generation from that snapshot.
+      </p>
     </div>
 
     <script>
@@ -537,8 +326,7 @@ function renderPage(status) {
       function bars(h) {
         document.getElementById("pulse-strip").innerHTML = h.slice(-24).map((p) => {
           const ht = 12 + Math.min(Math.abs(p.driftMs), 200) / 4;
-          const c = p.phase === "steady" ? "pulse-steady" : p.phase === "handoff" ? "pulse-handoff" : "pulse-recovered";
-          return '<span class="pulse-bar ' + c + '" style="height:' + ht + 'px"></span>';
+          return '<span class="pulse-bar pulse-' + p.phase + '" style="height:' + ht + 'px"></span>';
         }).join("");
       }
 
@@ -550,9 +338,6 @@ function renderPage(status) {
           document.getElementById("heartbeat-count").textContent = s.heartbeatCount;
           document.getElementById("last-heartbeat").textContent = clk(s.lastHeartbeatAt);
           bars(s.pulseHistory || []);
-          if (s.nextSandboxUrl && location.href !== s.nextSandboxUrl + "/") {
-            setTimeout(() => { location.href = s.nextSandboxUrl; }, 8000);
-          }
         } catch {}
       }
 
